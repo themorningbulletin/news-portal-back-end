@@ -1,8 +1,8 @@
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import express, { Router } from "express";
-import helmet from "helmet";
+import express, { Router, type RequestHandler } from "express";
+import helmetModule, { type HelmetOptions } from "helmet";
 import { pinoHttp } from "pino-http";
 import { env } from "./config/env.js";
 import type { IdentityProvider } from "./lib/identity.js";
@@ -16,7 +16,7 @@ import { noOperatorKeys } from "./middleware/no-operator-keys.js";
 import { createRateLimiters, defaultRateLimits, type RateLimitConfig } from "./middleware/rate-limit.js";
 import { requestId } from "./middleware/request-id.js";
 import { adRoutes, adminAdRoutes } from "./modules/ad/ad.routes.js";
-import { adminArticleRoutes, articleRoutes } from "./modules/article/article.routes.js";
+import { adminArticleRoutes, articleRoutes, cronRoutes } from "./modules/article/article.routes.js";
 import { adminAuditRoutes } from "./modules/audit/audit.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { bookmarkRoutes } from "./modules/bookmark/bookmark.routes.js";
@@ -32,12 +32,17 @@ import { adminSeoRoutes } from "./modules/seo/seo.routes.js";
 import { adminTagRoutes, tagRoutes } from "./modules/tag/tag.routes.js";
 import { adminUserRoutes, authorRoutes, meRoutes } from "./modules/user/user.routes.js";
 
+// Vercel's compiler resolves helmet's CommonJS typings, where the default import is the module object.
+const helmet = helmetModule as unknown as (options?: Readonly<HelmetOptions>) => RequestHandler;
+
 export interface AppDeps {
   identity: IdentityProvider;
   revalidate: Revalidator;
   storage: MediaStorage;
   mailer: Mailer;
   rateLimits?: Partial<RateLimitConfig>;
+  /** Runs before every API route (serverless: open the database connection). */
+  prepare?: RequestHandler;
 }
 
 export function createApp(deps: AppDeps) {
@@ -96,6 +101,7 @@ export function createApp(deps: AppDeps) {
   const v1 = Router();
   v1.use(limiters.api);
   v1.use(healthRoutes());
+  v1.use("/internal/cron", cronRoutes({ revalidate }));
   v1.use(authenticate(identity));
 
   // Accounts
@@ -132,6 +138,7 @@ export function createApp(deps: AppDeps) {
   v1.use("/pages", pageRoutes({ revalidate }));
   v1.use("/ads", adRoutes({ revalidate }));
 
+  if (deps.prepare) app.use(deps.prepare);
   app.use("/api/v1", v1);
   app.use(notFoundHandler);
   app.use(errorHandler);

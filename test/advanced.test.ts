@@ -1,5 +1,6 @@
 import request from "supertest";
 import { beforeEach, describe, expect, it } from "vitest";
+import { resetEnvCache } from "../src/config/env.js";
 import { analyzeSeo, type SeoInput } from "../src/modules/seo/seo.analyzer.js";
 import { seedDatabase } from "../src/seed/run.js";
 import { Article, ArticleDailyStat } from "../src/shared/models.js";
@@ -126,5 +127,28 @@ describe("SEO dashboard and newsroom tools", () => {
     expect((await request(ctx.app).post(`/api/v1/admin/articles/${a!._id}/end-breaking`).set(editor.auth)).status).toBe(204);
     expect((await Article.findById(a!._id).lean())!.breakingUntil).toBeNull();
     expect(ctx.revalidated.flat()).toContain("articles");
+  });
+});
+
+describe("Serverless scheduler endpoint", () => {
+  const ctx = useTestApp();
+  const url = "/api/v1/internal/cron/scheduler";
+
+  it("rejects callers without the cron secret and publishes due stories with it", async () => {
+    process.env.CRON_SECRET = "c".repeat(32);
+    resetEnvCache();
+    try {
+      await seedDatabase();
+      const story = await Article.findOneAndUpdate({ status: "published" }, { status: "scheduled", scheduledFor: new Date(Date.now() - 60_000) });
+      expect((await request(ctx.app).get(url)).status).toBe(401);
+      expect((await request(ctx.app).get(url).set("authorization", `Bearer ${"x".repeat(32)}`)).status).toBe(401);
+      const ok = await request(ctx.app).get(url).set("authorization", `Bearer ${"c".repeat(32)}`);
+      expect(ok.status).toBe(200);
+      expect(ok.body.data.published).toBe(1);
+      expect((await Article.findById(story!._id))!.status).toBe("published");
+    } finally {
+      delete process.env.CRON_SECRET;
+      resetEnvCache();
+    }
   });
 });

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, inject } from "vitest";
-import { createApp, type AppDeps } from "../src/app.js";
+import { createApp, type AppDeps } from "../src/create-app.js";
 import type { Identity, IdentityProvider } from "../src/lib/identity.js";
 import { IdentityError } from "../src/lib/identity.js";
 import { syncAllIndexes } from "../src/lib/indexes.js";

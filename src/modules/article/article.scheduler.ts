@@ -67,3 +67,21 @@ export function startScheduler(revalidate: Revalidator, intervalMs: number): () 
   timer.unref();
   return () => clearInterval(timer);
 }
+
+/** Serverless has no long-lived timer: runs a tick on demand, at most once per interval in each instance. */
+export function createThrottledTick(revalidate: Revalidator, intervalMs: number): () => Promise<void> {
+  let last = new Date();
+  let nextRun = 0;
+  return async () => {
+    if (Date.now() < nextRun) return;
+    nextRun = Date.now() + intervalMs;
+    const now = new Date();
+    try {
+      const n = await schedulerTick(revalidate, last, now);
+      if (n) logger.info({ published: n }, "scheduled stories published");
+      last = now;
+    } catch (err) {
+      logger.error({ err }, "scheduler tick failed");
+    }
+  };
+}

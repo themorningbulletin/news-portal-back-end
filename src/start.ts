@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import mongoose from "mongoose";
-import { createApp } from "./app.js";
+import { createApp } from "./create-app.js";
 import { env } from "./config/env.js";
 import { connectDb, disconnectDb } from "./lib/db.js";
 import { FirebaseIdentityProvider } from "./lib/identity.js";

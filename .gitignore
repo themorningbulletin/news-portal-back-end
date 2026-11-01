@@ -8,3 +8,4 @@ coverage/
 *.log
 service-account*.json
 *firebase-adminsdk*.json
+.vercel

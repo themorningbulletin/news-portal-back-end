@@ -1,10 +1,14 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router } from "express";
+import { env } from "../../config/env.js";
+import { AppError } from "../../lib/errors.js";
 import type { Revalidator } from "../../lib/revalidate.js";
 import { requirePermission } from "../../middleware/auth.js";
 import { noStore, publicCache } from "../../middleware/cache.js";
 import type { RateLimiters } from "../../middleware/rate-limit.js";
 import { createArticleAdminController } from "./article.admin.controller.js";
 import { articleController as c } from "./article.controller.js";
+import { schedulerTick } from "./article.scheduler.js";
 
 /** Public reading endpoints: /homepage, /articles, /search, /archive, /sitemap. */
 export function articleRoutes(deps: { limiters: RateLimiters }) {
@@ -40,5 +44,20 @@ export function adminArticleRoutes(deps: { revalidate: Revalidator }) {
   r.post("/:id/end-breaking", a.endBreaking);
   r.get("/:id/revisions", a.revisions);
   r.post("/:id/revisions/:revisionId/restore", a.restoreRevision);
+  return r;
+}
+
+/** /internal/cron: for hosts without a long-running process. Only a matching CRON_SECRET may trigger it. */
+export function cronRoutes(deps: { revalidate: Revalidator }) {
+  const r = Router();
+  r.get("/scheduler", noStore, async (req, res) => {
+    const secret = env().CRON_SECRET;
+    const a = Buffer.from(req.get("authorization") ?? "");
+    const b = Buffer.from(`Bearer ${secret}`);
+    if (!secret || a.length !== b.length || !timingSafeEqual(a, b)) throw new AppError("unauthenticated", "Invalid cron secret");
+    const now = new Date();
+    const published = await schedulerTick(deps.revalidate, new Date(now.getTime() - 10 * 60_000), now);
+    res.json({ data: { published } });
+  });
   return r;
 }

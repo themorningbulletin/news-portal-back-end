@@ -38,19 +38,21 @@ const EnvSchema = z
     CLOUDINARY_CLOUD_NAME: optionalString,
     CLOUDINARY_API_KEY: optionalString,
     CLOUDINARY_API_SECRET: optionalString,
-    CLOUDINARY_FOLDER: z.string().default("khoka-news"),
-    UPLOAD_MAX_BYTES: z.coerce.number().int().min(100_000).max(25_000_000).default(8_000_000),
+    CLOUDINARY_FOLDER: z.string().default("the-morning-bulletin"),
+    UPLOAD_MAX_BYTES: z.coerce.number().int().min(100_000).max(25_000_000).default(4_000_000),
 
     SMTP_URL: optionalString,
     MAIL_FROM: optionalString,
 
     /** Scales every rate limit; only for automated test environments (refused in production unless 1). */
     RATE_LIMIT_MULTIPLIER: z.coerce.number().int().min(1).max(100).default(1),
+    /** Bearer secret for GET /api/v1/internal/cron/scheduler (Vercel Cron sends it automatically). */
+    CRON_SECRET: optionalString,
     SCHEDULER_ENABLED: boolish.default(true),
     SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(5_000).max(600_000).default(30_000),
   })
   .superRefine((env, ctx) => {
-    for (const key of ["REVALIDATE_SECRET", "INTERNAL_API_KEY"] as const) {
+    for (const key of ["REVALIDATE_SECRET", "INTERNAL_API_KEY", "CRON_SECRET"] as const) {
       if (env[key] && env[key].length < 32) ctx.addIssue({ code: "custom", path: [key], message: "must be at least 32 characters" });
     }
     if (env.NODE_ENV !== "production") return;
