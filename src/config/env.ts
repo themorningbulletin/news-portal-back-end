@@ -78,7 +78,8 @@ const EnvSchema = z
 export type Env = z.infer<typeof EnvSchema>;
 
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const result = EnvSchema.safeParse(source);
+  // A Vercel deployment is never development, whatever NODE_ENV was copied over: the production checks must run.
+  const result = EnvSchema.safeParse(source.VERCEL ? { ...source, NODE_ENV: "production" } : source);
   if (!result.success) {
     const details = result.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`Invalid environment configuration:\n${details}`);

@@ -1,6 +1,6 @@
 import request from "supertest";
 import { beforeEach, describe, expect, it } from "vitest";
-import { resetEnvCache } from "../src/config/env.js";
+import { parseEnv, resetEnvCache } from "../src/config/env.js";
 import { analyzeSeo, type SeoInput } from "../src/modules/seo/seo.analyzer.js";
 import { seedDatabase } from "../src/seed/run.js";
 import { Article, ArticleDailyStat } from "../src/shared/models.js";
@@ -150,5 +150,12 @@ describe("Serverless scheduler endpoint", () => {
       delete process.env.CRON_SECRET;
       resetEnvCache();
     }
+  });
+});
+
+describe("Environment on Vercel", () => {
+  it("always applies the production rules, even if NODE_ENV says development", () => {
+    expect(() => parseEnv({ VERCEL: "1", NODE_ENV: "development" })).toThrow(/MONGODB_URI: is required in production/);
+    expect(parseEnv({ NODE_ENV: "development" }).NODE_ENV).toBe("development");
   });
 });
