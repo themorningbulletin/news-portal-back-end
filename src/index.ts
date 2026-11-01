@@ -20,9 +20,9 @@ function ensureDb(): Promise<unknown> {
   if (mongoose.connection.readyState === 1) return Promise.resolve();
   const uri = env().MONGODB_URI;
   if (!uri) return Promise.reject(new Error("MONGODB_URI is not set"));
-  connecting ??= connectDb(uri, 5).catch((err: unknown) => {
+  // Cleared once settled, so a dropped connection or failed attempt is retried by the next request.
+  connecting ??= connectDb(uri, 5).finally(() => {
     connecting = undefined;
-    throw err;
   });
   return connecting;
 }
