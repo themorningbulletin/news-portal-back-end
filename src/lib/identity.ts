@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { cert, getApps, initializeApp, applicationDefault, type App } from "firebase-admin/app";
 import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
 import { env } from "../config/env.js";
+import { logger } from "./logger.js";
 
 export interface Identity {
   uid: string;
@@ -42,6 +43,20 @@ function toIdentity(decoded: DecodedIdToken): Identity {
   };
 }
 
+/** Hosting dashboards keep whatever was pasted: surrounding quotes and escaped newlines included. */
+export function normalizePrivateKey(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^(["'])([\s\S]*)\1$/, "$2")
+    .replace(/\\n/g, "\n");
+}
+
+/** Reasons only (never the token): a broken credential otherwise looks like a bad sign-in. */
+function logFailure(operation: string, err: unknown): void {
+  const { code, message } = err as { code?: string; message?: string };
+  logger.warn({ code, reason: message?.slice(0, 300) }, `firebase ${operation} failed`);
+}
+
 function firebaseApp(): App {
   const existing = getApps()[0];
   if (existing) return existing;
@@ -50,6 +65,17 @@ function firebaseApp(): App {
     // firebase-admin reads this variable itself; the emulator needs no credentials.
     process.env.FIREBASE_AUTH_EMULATOR_HOST = e.FIREBASE_AUTH_EMULATOR_HOST;
     return initializeApp({ projectId: e.FIREBASE_PROJECT_ID ?? "demo-khoka-news" });
+  }
+  // Environment credentials win: on serverless hosts the service-account file does not exist.
+  if (e.FIREBASE_CLIENT_EMAIL && e.FIREBASE_PRIVATE_KEY && e.FIREBASE_PROJECT_ID) {
+    return initializeApp({
+      credential: cert({
+        projectId: e.FIREBASE_PROJECT_ID,
+        clientEmail: e.FIREBASE_CLIENT_EMAIL,
+        privateKey: normalizePrivateKey(e.FIREBASE_PRIVATE_KEY),
+      }),
+      projectId: e.FIREBASE_PROJECT_ID,
+    });
   }
   if (e.FIREBASE_SERVICE_ACCOUNT_PATH) {
     const sa = JSON.parse(readFileSync(resolve(e.FIREBASE_SERVICE_ACCOUNT_PATH), "utf8")) as {
@@ -60,17 +86,6 @@ function firebaseApp(): App {
     return initializeApp({
       credential: cert({ projectId: sa.project_id, clientEmail: sa.client_email, privateKey: sa.private_key }),
       projectId: e.FIREBASE_PROJECT_ID ?? sa.project_id,
-    });
-  }
-  if (e.FIREBASE_CLIENT_EMAIL && e.FIREBASE_PRIVATE_KEY && e.FIREBASE_PROJECT_ID) {
-    return initializeApp({
-      credential: cert({
-        projectId: e.FIREBASE_PROJECT_ID,
-        clientEmail: e.FIREBASE_CLIENT_EMAIL,
-        // Private keys in env files usually carry escaped newlines.
-        privateKey: e.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-      }),
-      projectId: e.FIREBASE_PROJECT_ID,
     });
   }
   // Falls back to Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS or a cloud runtime).
@@ -85,7 +100,8 @@ export class FirebaseIdentityProvider implements IdentityProvider {
   async verifyIdToken(idToken: string): Promise<Identity> {
     try {
       return toIdentity(await this.auth().verifyIdToken(idToken, true));
-    } catch {
+    } catch (err) {
+      logFailure("verifyIdToken", err);
       throw new IdentityError("Invalid or expired ID token");
     }
   }
@@ -93,7 +109,8 @@ export class FirebaseIdentityProvider implements IdentityProvider {
   async createSessionCookie(idToken: string, expiresInMs: number): Promise<string> {
     try {
       return await this.auth().createSessionCookie(idToken, { expiresIn: expiresInMs });
-    } catch {
+    } catch (err) {
+      logFailure("createSessionCookie", err);
       throw new IdentityError("Could not create a session from this ID token");
     }
   }

@@ -1,6 +1,7 @@
 import request from "supertest";
 import { beforeEach, describe, expect, it } from "vitest";
 import { parseEnv, resetEnvCache } from "../src/config/env.js";
+import { normalizePrivateKey } from "../src/lib/identity.js";
 import { analyzeSeo, type SeoInput } from "../src/modules/seo/seo.analyzer.js";
 import { seedDatabase } from "../src/seed/run.js";
 import { Article, ArticleDailyStat } from "../src/shared/models.js";
@@ -157,5 +158,18 @@ describe("Environment on Vercel", () => {
   it("always applies the production rules, even if NODE_ENV says development", () => {
     expect(() => parseEnv({ VERCEL: "1", NODE_ENV: "development" })).toThrow(/MONGODB_URI: is required in production/);
     expect(parseEnv({ NODE_ENV: "development" }).NODE_ENV).toBe("development");
+  });
+});
+
+describe("Firebase private key from a hosting dashboard", () => {
+  const nl = String.fromCharCode(10);
+  const escaped = ["-----BEGIN PRIVATE KEY-----", "abc", "-----END PRIVATE KEY-----", ""].join(String.fromCharCode(92) + "n");
+  const real = ["-----BEGIN PRIVATE KEY-----", "abc", "-----END PRIVATE KEY-----", ""].join(nl);
+
+  it("accepts quoted, escaped and plain multi-line values", () => {
+    expect(normalizePrivateKey(`"${escaped}"`)).toBe(real);
+    expect(normalizePrivateKey(`'${escaped}'`)).toBe(real);
+    expect(normalizePrivateKey(escaped)).toBe(real);
+    expect(normalizePrivateKey(`  ${real}  `).trim()).toBe(real.trim());
   });
 });
