@@ -55,5 +55,13 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "sanitize-html": {
+      "htmlparser2": "^10.1.0"
+    },
+    "jwks-rsa": {
+      "jose": "^5.10.0"
+    }
   }
 }
