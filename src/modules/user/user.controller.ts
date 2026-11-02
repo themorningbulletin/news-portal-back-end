@@ -17,6 +17,7 @@ import {
   localeQuery,
   preferencesSchema,
   slugParam,
+  inviteUserSchema,
   updateUserSchema,
 } from "./user.validation.js";
 
@@ -56,6 +57,14 @@ export function createUserController(deps: { identity: IdentityProvider; revalid
       });
       if (input.author) await deps.revalidate(["authors", "articles"]);
       res.json({ data: withId(updated) });
+    },
+
+    async invite(req: Request, res: Response) {
+      const input = parse(inviteUserSchema, req.body);
+      const { user, created, resetLink } = await users.inviteUser(req.auth!.profile, deps.identity, input);
+      const id = String(user._id);
+      await audit(req, { action: "user.invite", entityType: "user", entityId: id, metadata: { role: input.role, created } });
+      res.status(201).json({ data: { user: withId(user), created, resetLink } });
     },
 
     async updateOwnByline(req: Request, res: Response) {

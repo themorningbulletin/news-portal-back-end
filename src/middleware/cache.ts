@@ -4,7 +4,8 @@ import type { RequestHandler } from "express";
 export const publicCache =
   (seconds = 60): RequestHandler =>
   (_req, res, next) => {
-    res.set("Cache-Control", `public, max-age=${Math.min(seconds, 60)}, s-maxage=${seconds}, stale-while-revalidate=300`);
+    // No s-maxage: a shared CDN copy would hand stale data to the site right after a revalidation webhook.
+    res.set("Cache-Control", `public, max-age=${Math.min(seconds, 60)}`);
     next();
   };
 

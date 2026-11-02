@@ -3,7 +3,7 @@ import { Schema } from "mongoose";
 export const LOCALES = ["bn", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-export const ROLES = ["reader", "author", "editor", "admin", "ad_manager", "moderator"] as const;
+export const ROLES = ["reader", "author", "editor", "manager", "sub_admin", "admin", "ad_manager", "moderator"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ARTICLE_STATUSES = ["draft", "in_review", "scheduled", "published", "archived"] as const;

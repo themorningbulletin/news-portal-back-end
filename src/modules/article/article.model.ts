@@ -46,6 +46,9 @@ export interface ArticleDoc {
   };
   isFeatured: boolean;
   isEditorsPick: boolean;
+  pinnedAt?: Date;
+  featuredAt?: Date;
+  editorsPickAt?: Date;
   pinnedUntil?: Date | null;
   breakingUntil?: Date | null;
   scheduledFor?: Date | null;
@@ -90,6 +93,9 @@ const articleSchema = new Schema<ArticleDoc>(
     },
     isFeatured: { type: Boolean, default: false },
     isEditorsPick: { type: Boolean, default: false },
+    pinnedAt: { type: Date },
+    featuredAt: { type: Date },
+    editorsPickAt: { type: Date },
     pinnedUntil: { type: Date, default: null },
     breakingUntil: { type: Date, default: null },
     scheduledFor: { type: Date, default: null },

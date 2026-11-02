@@ -12,6 +12,7 @@ import { Media } from "../modules/media/media.model.js";
 import { NewsletterSubscriber } from "../modules/newsletter/newsletter.model.js";
 import { Page } from "../modules/page/page.model.js";
 import { SiteSettings } from "../modules/settings/settings.model.js";
+import { RoleModel } from "../modules/role/role.model.js";
 import { Tag } from "../modules/tag/tag.model.js";
 import { UserProfile } from "../modules/user/user.model.js";
 
@@ -27,6 +28,7 @@ export {
   NewsletterSubscriber,
   Page,
   ReferrerDailyStat,
+  RoleModel,
   SiteSettings,
   Tag,
   UserProfile,
@@ -47,4 +49,5 @@ export const allModels = [
   SiteSettings,
   AdPlacement,
   Page,
+  RoleModel,
 ];

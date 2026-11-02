@@ -37,6 +37,7 @@ export function adminUserRoutes(deps: Deps) {
   r.patch("/me/author", requireAuth, c.updateOwnByline);
   r.get("/staff", requirePermission("article:create"), c.staff);
   r.get("/", requirePermission("users:manage"), c.list);
+  r.post("/invite", requirePermission("users:manage"), c.invite);
   r.patch("/:id", requirePermission("users:manage"), c.update);
   return r;
 }

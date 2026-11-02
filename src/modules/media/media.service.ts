@@ -4,8 +4,11 @@ import { AppError, forbidden, notFound } from "../../lib/errors.js";
 import type { Types } from "mongoose";
 import { hasPermission } from "../../lib/permissions.js";
 import { sanitizePlain } from "../../lib/sanitize.js";
+import { logger } from "../../lib/logger.js";
 import { escapeRegex } from "../../lib/text.js";
-import { Article } from "../article/article.model.js";
+import { Article, ArticleRevision } from "../article/article.model.js";
+import { Page } from "../page/page.model.js";
+import { UserProfile } from "../user/user.model.js";
 import type { Profile } from "../user/user.service.js";
 import { Media } from "./media.model.js";
 import type { MediaMetaInput, MediaUploadMeta } from "./media.validation.js";
@@ -40,6 +43,7 @@ export interface UploadedImage {
 export interface MediaStorage {
   enabled(): boolean;
   upload(file: Buffer, type: AllowedImageType): Promise<UploadedImage>;
+  destroy(publicId: string): Promise<void>;
 }
 
 /** Signed server-side upload to Cloudinary; the API secret never reaches the browser. */
@@ -84,6 +88,27 @@ export const cloudinaryStorage: MediaStorage = {
       format: json.format,
       bytes: json.bytes,
     };
+  },
+  async destroy(publicId) {
+    const e = env();
+    if (!features.mediaUploads(e)) throw new AppError("feature_disabled", "Media storage is not configured");
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const toSign = `invalidate=true&public_id=${publicId}&timestamp=${timestamp}${e.CLOUDINARY_API_SECRET}`;
+    const form = new FormData();
+    form.set("public_id", publicId);
+    form.set("invalidate", "true");
+    form.set("api_key", e.CLOUDINARY_API_KEY!);
+    form.set("timestamp", timestamp);
+    form.set("signature", createHash("sha1").update(toSign).digest("hex"));
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(e.CLOUDINARY_CLOUD_NAME!)}/image/destroy`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new AppError("upstream_failed", "The media service rejected the deletion");
+    const { result } = (await res.json()) as { result?: string };
+    // "not found" means it is already gone, which is what we wanted.
+    if (result !== "ok" && result !== "not found") throw new AppError("upstream_failed", "The media service did not delete the image");
   },
 };
 
@@ -162,4 +187,42 @@ export async function updateMedia(user: Profile, id: Types.ObjectId, input: Medi
     .lean();
   const counts = await usageCounts([id]);
   return { media: { ...updated!.toObject({ versionKey: false }), id: String(id), usageCount: counts.get(String(id)) ?? 0 }, affected };
+}
+
+/** Is this image still shown anywhere: a story, an old version of a story, an editorial page or a byline? */
+async function imageInUse(id: Types.ObjectId, url: string): Promise<boolean> {
+  const inHtml = new RegExp(escapeRegex(url));
+  const checks = await Promise.all([
+    Article.exists({ $or: [{ featuredImage: id }, { "seo.socialImage": id }, { body: inHtml }] }),
+    ArticleRevision.exists({ $or: [{ "snapshot.featuredImage": String(id) }, { "snapshot.seo.socialImage": String(id) }, { "snapshot.body": inHtml }] }),
+    Page.exists({ body: inHtml }),
+    UserProfile.exists({ "author.avatarUrl": url }),
+  ]);
+  return checks.some(Boolean);
+}
+
+/**
+ * Removes images that a deleted story no longer needs. Anything still used
+ * elsewhere, or not stored in Cloudinary (bundled sample images), is kept.
+ * A failed removal keeps the library record, so the image is never lost track of.
+ */
+export async function releaseImages(storage: MediaStorage, ids: Types.ObjectId[], urls: string[]) {
+  const candidates = await Media.find({ $or: [{ _id: { $in: ids } }, { url: { $in: urls } }] });
+  let deleted = 0;
+  let kept = 0;
+  for (const media of candidates) {
+    if (media.provider !== "cloudinary" || (await imageInUse(media._id, media.url))) {
+      kept++;
+      continue;
+    }
+    try {
+      await storage.destroy(media.publicId);
+      await media.deleteOne();
+      deleted++;
+    } catch (err) {
+      kept++;
+      logger.error({ err: (err as Error).message, media: String(media._id) }, "could not delete image from storage");
+    }
+  }
+  return { deleted, kept };
 }

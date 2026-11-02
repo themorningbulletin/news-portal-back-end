@@ -6,6 +6,7 @@ import type { Revalidator } from "../../lib/revalidate.js";
 import { requirePermission } from "../../middleware/auth.js";
 import { noStore, publicCache } from "../../middleware/cache.js";
 import type { RateLimiters } from "../../middleware/rate-limit.js";
+import type { MediaStorage } from "../media/media.service.js";
 import { createArticleAdminController } from "./article.admin.controller.js";
 import { articleController as c } from "./article.controller.js";
 import { schedulerTick } from "./article.scheduler.js";
@@ -28,7 +29,7 @@ export function articleRoutes(deps: { limiters: RateLimiters }) {
 }
 
 /** /admin/articles */
-export function adminArticleRoutes(deps: { revalidate: Revalidator }) {
+export function adminArticleRoutes(deps: { revalidate: Revalidator; storage: MediaStorage }) {
   const a = createArticleAdminController(deps);
   const r = Router();
   r.use(noStore, requirePermission("article:create"));
@@ -38,6 +39,7 @@ export function adminArticleRoutes(deps: { revalidate: Revalidator }) {
   r.get("/calendar", a.calendar);
   r.get("/:id", a.get);
   r.patch("/:id", a.update);
+  r.delete("/:id", a.remove);
   r.post("/:id/transition", a.transition);
   r.post("/:id/notes", a.addNote);
   r.post("/:id/duplicate", a.duplicate);

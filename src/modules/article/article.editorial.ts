@@ -49,7 +49,7 @@ export function canEdit(user: Profile, article: ArticleLike): boolean {
 
 export function canPublish(user: Profile, article: ArticleLike): boolean {
   if (hasPermission(user.role, "article:publish")) return true;
-  return user.role === "author" && user.canPublish && isOwner(user, article);
+  return hasPermission(user.role, "article:create") && user.canPublish && isOwner(user, article);
 }
 
 /** Featured flags, pinning and breaking banners are homepage decisions reserved for editors. */

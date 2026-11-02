@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
 import type { IdentityProvider } from "../lib/identity.js";
 import { hasPermission, type Permission } from "../lib/permissions.js";
+import { ensureRolesLoaded } from "../modules/role/role.service.js";
 import { UserProfile } from "../modules/user/user.model.js";
 
 const isProd = () => env().NODE_ENV === "production";
@@ -53,6 +54,7 @@ export function authenticate(identity: IdentityProvider): RequestHandler {
         // First contact: every new identity starts as a reader. Roles are only granted by admins.
         profile = await UserProfile.create({ firebaseUid: id.uid, email: id.email, displayName: id.name });
       }
+      await ensureRolesLoaded();
       req.auth = { identity: id, profile, via };
     } catch {
       // Invalid credentials are treated as anonymous; protected routes answer 401.
@@ -67,11 +69,11 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
   next();
 };
 
-export function requirePermission(permission: Permission): RequestHandler {
+export function requirePermission(...anyOf: Permission[]): RequestHandler {
   return (req, _res, next) => {
     if (!req.auth) return next(new AppError("unauthenticated", "Sign in to continue"));
     if (req.auth.profile.disabled) return next(new AppError("forbidden", "This account is disabled"));
-    if (!hasPermission(req.auth.profile.role, permission)) {
+    if (!anyOf.some((permission) => hasPermission(req.auth!.profile.role, permission))) {
       return next(new AppError("forbidden", "You do not have permission to perform this action"));
     }
     next();

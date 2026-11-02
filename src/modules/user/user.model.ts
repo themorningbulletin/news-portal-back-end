@@ -1,11 +1,9 @@
 import { Schema, model, type Types } from "mongoose";
 import {
   LOCALES,
-  ROLES,
   localizedString,
   type Locale,
   type Localized,
-  type Role,
 } from "../../shared/constants.js";
 
 export interface UserProfileDoc {
@@ -13,7 +11,8 @@ export interface UserProfileDoc {
   firebaseUid: string;
   email?: string;
   displayName?: string;
-  role: Role;
+  /** A built-in role (see shared/constants.ts) or a custom role key. */
+  role: string;
   /** Explicit permission for an author to publish their own stories. */
   canPublish: boolean;
   disabled: boolean;
@@ -41,7 +40,7 @@ const userProfileSchema = new Schema<UserProfileDoc>(
     firebaseUid: { type: String, required: true, maxlength: 128 },
     email: { type: String, lowercase: true, trim: true, maxlength: 254 },
     displayName: { type: String, trim: true, maxlength: 120 },
-    role: { type: String, enum: ROLES, default: "reader" },
+    role: { type: String, default: "reader", maxlength: 40 },
     canPublish: { type: Boolean, default: false },
     disabled: { type: Boolean, default: false },
     author: {

@@ -1,11 +1,11 @@
 import type { HydratedDocument, Types } from "mongoose";
-import { AppError, notFound } from "../../lib/errors.js";
+import { AppError, forbidden, notFound } from "../../lib/errors.js";
 import type { IdentityProvider } from "../../lib/identity.js";
 import { logger } from "../../lib/logger.js";
-import { STAFF_ROLES } from "../../lib/permissions.js";
+import { hasPermission, isKnownRole, isStaffRole, rolesWith } from "../../lib/permissions.js";
 import { sanitizePlain } from "../../lib/sanitize.js";
 import { escapeRegex } from "../../lib/text.js";
-import type { Locale, Role } from "../../shared/constants.js";
+import type { Locale } from "../../shared/constants.js";
 import { Bookmark } from "../bookmark/bookmark.model.js";
 import { Category } from "../category/category.model.js";
 import { serializeCategory } from "../category/category.serializer.js";
@@ -13,7 +13,7 @@ import { Tag } from "../tag/tag.model.js";
 import { serializeTag } from "../tag/tag.serializer.js";
 import { UserProfile, type UserProfileDoc } from "./user.model.js";
 import { serializeAuthorProfile, type LeanAuthor } from "./user.serializer.js";
-import type { AuthorProfileInput, UpdateUserInput } from "./user.validation.js";
+import type { AuthorProfileInput, InviteUserInput, UpdateUserInput } from "./user.validation.js";
 
 export type Profile = HydratedDocument<UserProfileDoc>;
 
@@ -56,7 +56,7 @@ export async function findPublicAuthorId(slug: string): Promise<Types.ObjectId |
 
 /* ---------------- Newsroom administration ---------------- */
 
-export async function listUsers(q: { page: number; limit: number; q?: string; role?: Role }) {
+export async function listUsers(q: { page: number; limit: number; q?: string; role?: string }) {
   const filter: Record<string, unknown> = {};
   if (q.role) filter.role = q.role;
   if (q.q) {
@@ -72,11 +72,18 @@ export async function listUsers(q: { page: number; limit: number; q?: string; ro
 
 /** Active newsroom staff, for byline pickers (no emails). */
 export function listStaff() {
-  return UserProfile.find({ role: { $in: ["author", "editor", "admin"] }, disabled: false })
+  return UserProfile.find({ role: { $in: rolesWith("article:create") }, disabled: false })
     .select("displayName role author.name author.slug")
     .sort({ displayName: 1 })
     .limit(500)
     .lean();
+}
+
+/** A sub-admin manages staff, but only an admin can create someone who can manage users. */
+function assertMayAssign(actor: Profile, role?: string) {
+  if (role && actor.role !== "admin" && hasPermission(role, "users:manage")) {
+    throw forbidden("Only an admin can give this role");
+  }
 }
 
 /**
@@ -87,6 +94,11 @@ export function listStaff() {
 export async function updateUser(actor: Profile, id: Types.ObjectId, input: UpdateUserInput) {
   const target = await UserProfile.findById(id);
   if (!target) throw notFound("User");
+  if (input.role && !isKnownRole(input.role)) throw new AppError("validation_failed", "Unknown role");
+  assertMayAssign(actor, input.role);
+  if (actor.role !== "admin" && hasPermission(target.role, "users:manage")) {
+    throw forbidden("Only an admin can change an admin or sub-admin account");
+  }
   const demotingAdmin = target.role === "admin" && ((input.role && input.role !== "admin") || input.disabled === true);
   if (demotingAdmin) {
     if (String(target._id) === String(actor._id)) throw new AppError("conflict", "You cannot remove your own admin access");
@@ -103,8 +115,28 @@ export async function updateUser(actor: Profile, id: Types.ObjectId, input: Upda
 }
 
 export async function updateOwnByline(actor: Profile, input: AuthorProfileInput) {
-  if (!STAFF_ROLES.includes(actor.role)) throw new AppError("forbidden", "Only newsroom staff have bylines");
+  if (!isStaffRole(actor.role)) throw new AppError("forbidden", "Only newsroom staff have bylines");
   return (await UserProfile.findByIdAndUpdate(actor._id, { $set: authorProfileUpdate(input) }, { returnDocument: "after", runValidators: true }).lean())!;
+}
+
+/**
+ * Gives someone a role by email. A new person gets a Firebase account and a
+ * one-time link for choosing their own password, which the admin passes on.
+ */
+export async function inviteUser(actor: Profile, identity: IdentityProvider, input: InviteUserInput) {
+  if (!isKnownRole(input.role)) throw new AppError("validation_failed", "Unknown role");
+  assertMayAssign(actor, input.role);
+  const existingUid = await identity.findUidByEmail(input.email);
+  const uid = existingUid ?? (await identity.createUser(input.email, input.displayName));
+  const profile = await UserProfile.findOne({ firebaseUid: uid });
+  let user;
+  if (profile) {
+    user = (await updateUser(actor, profile._id, { role: input.role })).updated;
+  } else {
+    const created = await UserProfile.create({ firebaseUid: uid, email: input.email, displayName: input.displayName, role: input.role });
+    user = created.toObject({ versionKey: false });
+  }
+  return { user, created: !existingUid, resetLink: existingUid ? null : await identity.passwordResetLink(input.email) };
 }
 
 /* ---------------- Reader self-service ---------------- */
@@ -156,7 +188,7 @@ export async function exportAccount(profile: Profile) {
 
 /** Deletes the reader's data and Firebase sign-in. Staff accounts must be demoted by an admin first. */
 export async function deleteAccount(profile: Profile, identity: IdentityProvider) {
-  if (STAFF_ROLES.includes(profile.role)) {
+  if (isStaffRole(profile.role)) {
     throw new AppError("forbidden", "Staff accounts cannot be self-deleted; ask an administrator");
   }
   await Bookmark.deleteMany({ user: profile._id });

@@ -1,3 +1,4 @@
+import { resetRoleCache } from "../src/modules/role/role.service.js";
 import mongoose from "mongoose";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, inject } from "vitest";
@@ -38,8 +39,17 @@ export class FakeIdentity implements IdentityProvider {
   async deleteUser(uid: string) {
     this.deleted.push(uid);
   }
-  async findUidByEmail() {
-    return null;
+  known = new Map<string, string>();
+  async findUidByEmail(email: string) {
+    return this.known.get(email) ?? null;
+  }
+  async createUser(email: string) {
+    const uid = `invited-${email}`;
+    this.known.set(email, uid);
+    return uid;
+  }
+  async passwordResetLink(email: string) {
+    return `https://example.test/reset?email=${email}`;
   }
 }
 
@@ -61,11 +71,18 @@ export const disabledStorage: MediaStorage = {
   upload: async () => {
     throw new Error("disabled");
   },
+  destroy: async () => {
+    throw new Error("disabled");
+  },
 };
 
-export function fakeStorage(): MediaStorage & { uploads: number } {
+export function fakeStorage(): MediaStorage & { uploads: number; destroyed: string[] } {
   const s = {
     uploads: 0,
+    destroyed: [] as string[],
+    destroy: async (publicId: string) => {
+      s.destroyed.push(publicId);
+    },
     enabled: () => true,
     upload: async () => {
       s.uploads++;
@@ -103,6 +120,7 @@ export function useTestApp(overrides: Partial<AppDeps> = {}, dbName = `t${Math.r
   });
   beforeEach(async () => {
     for (const m of allModels) await m.collection.deleteMany({});
+    resetRoleCache();
     ctx.revalidated.length = 0;
     ctx.mailer.sent.length = 0;
   });

@@ -1,10 +1,13 @@
 import { Types, type HydratedDocument } from "mongoose";
 import { AppError, conflict, forbidden, notFound } from "../../lib/errors.js";
-import { hasPermission } from "../../lib/permissions.js";
+import { hasPermission, rolesWith } from "../../lib/permissions.js";
 import { escapeRegex, slugify, SLUG_PATTERN } from "../../lib/text.js";
+import { ArticleDailyStat } from "../analytics/analytics.model.js";
 import { viewsByArticle } from "../analytics/analytics.service.js";
+import { Bookmark } from "../bookmark/bookmark.model.js";
 import { Category } from "../category/category.model.js";
 import { Media } from "../media/media.model.js";
+import { releaseImages, type MediaStorage } from "../media/media.service.js";
 import { Tag } from "../tag/tag.model.js";
 import { UserProfile } from "../user/user.model.js";
 import type { Profile } from "../user/user.service.js";
@@ -28,6 +31,10 @@ import type { ArticleFieldsInput, CreateArticleInput, UpdateArticleInput } from 
 
 type ArticleDocument = HydratedDocument<ArticleDoc>;
 
+/** Editors may delete any story; authors only their own drafts, so published work needs an editor's decision. */
+const canDelete = (user: Profile, article: ArticleDocument) =>
+  hasPermission(user.role, "article:delete") || (isOwner(user, article) && article.status === "draft");
+
 const CURATION_KEYS = ["isFeatured", "isEditorsPick", "pinnedUntil", "breakingUntil"] as const;
 
 /** Every referenced section, tag, image and byline must exist (and bylines must be active staff). */
@@ -40,7 +47,7 @@ async function assertRefs(input: ArticleFieldsInput) {
     if (m && !(await Media.exists({ _id: m }))) throw new AppError("validation_failed", "Unknown media item");
   }
   if (input.authors?.length) {
-    const staff = await UserProfile.countDocuments({ _id: { $in: input.authors }, role: { $in: ["author", "editor", "admin"] }, disabled: false });
+    const staff = await UserProfile.countDocuments({ _id: { $in: input.authors }, role: { $in: rolesWith("article:create") }, disabled: false });
     if (staff !== new Set(input.authors.map(String)).size) throw new AppError("validation_failed", "Authors must be active newsroom staff");
   }
 }
@@ -86,7 +93,7 @@ export async function adminView(article: ArticleDocument, user: Profile) {
     stats: { views7: views7.get(String(article._id)) ?? 0, views30: views30.get(String(article._id)) ?? 0 },
     translations: translations.map((t) => ({ id: String(t._id), locale: t.locale, slug: t.slug, title: t.title, status: t.status })),
     checklist: items,
-    permissions: { canEdit: canEdit(user, article), canPublish: publishable, canCurate: canCurate(user), actions },
+    permissions: { canEdit: canEdit(user, article), canPublish: publishable, canCurate: canCurate(user), canDelete: canDelete(user, article), actions },
   };
 }
 
@@ -197,6 +204,11 @@ export async function updateArticle(user: Profile, id: Types.ObjectId, input: Up
     }
   }
   if (markUpdated && article.status === "published") set.contentUpdatedAt = new Date();
+  // Remember when each homepage decision was made: the most recent decision wins its slot.
+  const now = new Date();
+  if (input.isFeatured && !article.isFeatured) set.featuredAt = now;
+  if (input.isEditorsPick && !article.isEditorsPick) set.editorsPickAt = now;
+  if (input.pinnedUntil && new Date(input.pinnedUntil).getTime() !== article.pinnedUntil?.getTime()) set.pinnedAt = now;
 
   const updated = await Article.findOneAndUpdate({ _id: article._id, version }, { $set: set, $inc: { version: 1 } }, {
     returnDocument: "after",
@@ -381,6 +393,42 @@ export async function duplicateArticle(user: Profile, id: Types.ObjectId) {
   });
   await snapshot(copy, "manual", user);
   return copy;
+}
+
+const IMG_SRC = /<img\b[^>]*\bsrc="([^"]+)"/g;
+const imagesInHtml = (html: unknown) => (typeof html === "string" ? [...html.matchAll(IMG_SRC)].map((m) => m[1]!) : []);
+
+/**
+ * Permanently deletes one language version with its history and statistics,
+ * then every image only it was using (including ones from its older versions).
+ */
+export async function deleteArticle(user: Profile, id: Types.ObjectId, storage: MediaStorage) {
+  const article = await Article.findById(id);
+  if (!article) throw notFound("Article");
+  const seesAll = hasPermission(user.role, "article:edit_any") || hasPermission(user.role, "article:delete");
+  if (!seesAll && !isOwner(user, article)) throw notFound("Article");
+  if (!canDelete(user, article)) throw forbidden("Authors can only delete their own drafts");
+
+  const revisions = await ArticleRevision.find({ article: id }).select("snapshot").lean();
+  const versions = [
+    { featuredImage: article.featuredImage, socialImage: article.seo?.socialImage, body: article.body },
+    ...revisions.map((r) => {
+      const snap = r.snapshot as { featuredImage?: string; seo?: { socialImage?: string }; body?: string };
+      return { featuredImage: snap.featuredImage, socialImage: snap.seo?.socialImage, body: snap.body };
+    }),
+  ];
+  const ids = versions.flatMap((v) => [v.featuredImage, v.socialImage]).filter((v) => v && Types.ObjectId.isValid(String(v)));
+  const urls = versions.flatMap((v) => imagesInHtml(v.body));
+
+  const wasPublic = article.status === "published";
+  await Promise.all([ArticleRevision.deleteMany({ article: id }), ArticleDailyStat.deleteMany({ article: id })]);
+  await article.deleteOne();
+  // Bookmarks follow the story across languages, so they stay while a translation remains.
+  if (!(await Article.exists({ translationGroup: article.translationGroup }))) {
+    await Bookmark.deleteMany({ translationGroup: article.translationGroup });
+  }
+  const images = await releaseImages(storage, ids.map((v) => new Types.ObjectId(String(v))), urls);
+  return { article, wasPublic, images };
 }
 
 /** Ends an active breaking banner immediately (editors). */

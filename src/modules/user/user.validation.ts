@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { localeSchema, objectId, paginationSchema } from "../../lib/http.js";
 import { slugify, SLUG_PATTERN } from "../../lib/text.js";
-import { ROLES } from "../../shared/constants.js";
+import { roleKey } from "../role/role.validation.js";
 
 const localizedText = (max: number) =>
   z.object({ bn: z.string().trim().max(max).optional(), en: z.string().trim().max(max).optional() }).strict();
@@ -25,18 +25,27 @@ export type AuthorProfileInput = z.infer<typeof authorProfileSchema>;
 
 export const listUsersQuery = paginationSchema.extend({
   q: z.string().trim().max(100).optional(),
-  role: z.enum(ROLES).optional(),
+  role: roleKey.optional(),
 });
 
 export const updateUserSchema = z
   .object({
-    role: z.enum(ROLES).optional(),
+    role: roleKey.optional(),
     canPublish: z.boolean().optional(),
     disabled: z.boolean().optional(),
     author: authorProfileSchema.optional(),
   })
   .strict();
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+
+export const inviteUserSchema = z
+  .object({
+    email: z.email().max(254).transform((v) => v.toLowerCase()),
+    role: roleKey,
+    displayName: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict();
+export type InviteUserInput = z.infer<typeof inviteUserSchema>;
 
 export const preferencesSchema = z
   .object({

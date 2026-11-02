@@ -216,9 +216,11 @@ export async function homepage(locale: Locale) {
   const pub = publishedFilter(locale, now);
   // The lead and top stories never repeat elsewhere; other modules may overlap with the latest feed.
   const prominent: Types.ObjectId[] = [];
-  const take = async (filter: QueryFilter<ArticleDoc>, limit: number, exclude: Types.ObjectId[] = prominent) => {
-    const docs = await cardQuery({ ...pub, ...filter, _id: { $nin: exclude } })
-      .sort({ publishedAt: -1, _id: -1 })
+  const take = async (filter: QueryFilter<ArticleDoc>, limit: number, decidedAt?: "pinnedAt" | "featuredAt" | "editorsPickAt") => {
+    // Editors' choices go by when they were made (stories chosen before this was tracked fall back to their last edit).
+    const order: Record<string, 1 | -1> = decidedAt ? { [decidedAt]: -1, updatedAt: -1, _id: -1 } : { publishedAt: -1, _id: -1 };
+    const docs = await cardQuery({ ...pub, ...filter, _id: { $nin: prominent } })
+      .sort(order)
       .limit(limit)
       .lean<LeanArticle[]>();
     return docs.map((d) => serializeArticleCard(d, now));
@@ -226,15 +228,15 @@ export async function homepage(locale: Locale) {
   const markProminent = (items: ReturnType<typeof serializeArticleCard>[]) =>
     prominent.push(...items.map((i) => new Types.ObjectId(i.id)));
 
-  const pinned = await take({ pinnedUntil: { $gt: now } }, 1);
-  const lead = pinned[0] ?? (await take({ isFeatured: true }, 1))[0] ?? (await take({}, 1))[0] ?? null;
+  const pinned = await take({ pinnedUntil: { $gt: now } }, 1, "pinnedAt");
+  const lead = pinned[0] ?? (await take({ isFeatured: true }, 1, "featuredAt"))[0] ?? (await take({}, 1))[0] ?? null;
   if (lead) markProminent([lead]);
-  const topFeatured = await take({ isFeatured: true }, 4);
+  const topFeatured = await take({ isFeatured: true }, 4, "featuredAt");
   markProminent(topFeatured);
   const top = topFeatured.length < 4 ? [...topFeatured, ...(await take({}, 4 - topFeatured.length))] : topFeatured;
   markProminent(top.slice(topFeatured.length));
   const latest = await take({}, 8);
-  const editorsPicks = await take({ isEditorsPick: true }, 4);
+  const editorsPicks = await take({ isEditorsPick: true }, 4, "editorsPickAt");
   const explainers = await take({ format: "explainer" }, 4);
   const visual = await take({ format: { $in: ["photo", "video"] } }, 6);
   const opinion = await take({ format: "opinion" }, 4);

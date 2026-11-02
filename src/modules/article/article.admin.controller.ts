@@ -3,6 +3,7 @@ import { AppError } from "../../lib/errors.js";
 import { pageMeta, parse } from "../../lib/http.js";
 import type { Revalidator } from "../../lib/revalidate.js";
 import { audit } from "../audit/audit.service.js";
+import type { MediaStorage } from "../media/media.service.js";
 import * as admin from "./article.admin.service.js";
 import { revalidationTags } from "./article.editorial.js";
 import {
@@ -19,7 +20,7 @@ import {
 } from "./article.validation.js";
 
 /** Newsroom (CMS) article endpoints. Every action is permission-checked in the service layer. */
-export function createArticleAdminController(deps: { revalidate: Revalidator }) {
+export function createArticleAdminController(deps: { revalidate: Revalidator; storage: MediaStorage }) {
   return {
     async list(req: Request, res: Response) {
       const q = parse(adminListQuery, req.query);
@@ -55,6 +56,14 @@ export function createArticleAdminController(deps: { revalidate: Revalidator }) 
       }
       if (updated.status === "published") await deps.revalidate(revalidationTags(updated, [oldSlug]));
       res.json({ data: await admin.adminView(updated, user) });
+    },
+
+    async remove(req: Request, res: Response) {
+      const { id } = parse(idParams, req.params);
+      const { article, wasPublic, images } = await admin.deleteArticle(req.auth!.profile, id, deps.storage);
+      await audit(req, { action: "article.delete", entityType: "article", entityId: String(id), summary: article.title, metadata: { images } });
+      if (wasPublic) await deps.revalidate(revalidationTags(article));
+      res.json({ data: { deleted: true, images } });
     },
 
     async transition(req: Request, res: Response) {

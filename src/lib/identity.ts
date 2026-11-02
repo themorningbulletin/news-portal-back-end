@@ -24,6 +24,8 @@ export interface IdentityProvider {
   verifySessionCookie(cookie: string): Promise<Identity>;
   deleteUser(uid: string): Promise<void>;
   findUidByEmail(email: string): Promise<string | null>;
+  createUser(email: string, displayName?: string): Promise<string>;
+  passwordResetLink(email: string): Promise<string>;
 }
 
 export class IdentityError extends Error {
@@ -126,6 +128,14 @@ export class FirebaseIdentityProvider implements IdentityProvider {
 
   async deleteUser(uid: string): Promise<void> {
     await this.auth().deleteUser(uid);
+  }
+
+  async createUser(email: string, displayName?: string): Promise<string> {
+    return (await this.auth().createUser({ email, ...(displayName ? { displayName } : {}) })).uid;
+  }
+
+  async passwordResetLink(email: string): Promise<string> {
+    return this.auth().generatePasswordResetLink(email);
   }
 
   async findUidByEmail(email: string): Promise<string | null> {
