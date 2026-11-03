@@ -173,3 +173,17 @@ describe("Firebase private key from a hosting dashboard", () => {
     expect(normalizePrivateKey(`  ${real}  `).trim()).toBe(real.trim());
   });
 });
+
+describe("tags in two languages", () => {
+  const ctx = useTestApp();
+
+  it("gives a tag an address in a language added later", async () => {
+    const { auth } = await staff("editor");
+    const created = await request(ctx.app).post("/api/v1/admin/tags").set(auth).send({ name: { en: "Monsoon" } });
+    expect(created.status).toBe(201);
+    expect(created.body.data.slug.bn).toBeUndefined();
+    const updated = await request(ctx.app).patch(`/api/v1/admin/tags/${created.body.data.id}`).set(auth).send({ name: { bn: "বর্ষা" } });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data.slug).toEqual({ en: "monsoon", bn: "বর্ষা" });
+  });
+});

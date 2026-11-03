@@ -66,9 +66,20 @@ export async function create(input: TagCreateInput) {
 }
 
 export async function update(id: Types.ObjectId, input: TagUpdateInput) {
+  const current = await Tag.findById(id).lean();
+  if (!current) throw notFound("Tag");
   const set: Record<string, unknown> = {};
   if (input.name) for (const [k, v] of Object.entries(clean(input.name))) set[`name.${k}`] = v;
   if (input.slug) for (const [k, v] of Object.entries(input.slug)) if (v) set[`slug.${k}`] = v;
+  // A name added in a language the tag did not have yet also needs an address in that language.
+  for (const loc of ["bn", "en"] as const) {
+    const name = set[`name.${loc}`];
+    if (typeof name !== "string" || !name || current.slug?.[loc] || set[`slug.${loc}`]) continue;
+    const s = slugify(name);
+    if (!s || !SLUG_PATTERN.test(s)) throw new AppError("validation_failed", "Invalid tag slug");
+    if (await Tag.exists({ [`slug.${loc}`]: s, _id: { $ne: id } })) throw conflict("A tag with this name already exists");
+    set[`slug.${loc}`] = s;
+  }
   const doc = await Tag.findByIdAndUpdate(id, { $set: set }, { returnDocument: "after", runValidators: true });
   if (!doc) throw notFound("Tag");
   return doc;

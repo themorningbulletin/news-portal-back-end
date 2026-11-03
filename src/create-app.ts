@@ -28,6 +28,7 @@ import { adminMediaRoutes } from "./modules/media/media.routes.js";
 import { newsletterRoutes } from "./modules/newsletter/newsletter.routes.js";
 import { adminPageRoutes, pageRoutes } from "./modules/page/page.routes.js";
 import { adminSettingsRoutes, configRoutes } from "./modules/settings/settings.routes.js";
+import { adminCurationRoutes } from "./modules/article/article.curation.js";
 import { adminRoleRoutes } from "./modules/role/role.routes.js";
 import { adminSeoRoutes } from "./modules/seo/seo.routes.js";
 import { adminTagRoutes, tagRoutes } from "./modules/tag/tag.routes.js";
@@ -129,6 +130,7 @@ export function createApp(deps: AppDeps) {
   admin.use("/audit", adminAuditRoutes());
   admin.use("/seo", adminSeoRoutes());
   admin.use("/roles", adminRoleRoutes());
+  admin.use("/curation", adminCurationRoutes({ revalidate }));
   v1.use("/admin", admin);
 
   // Public reading
