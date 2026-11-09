@@ -18,8 +18,11 @@ export function configRoutes(deps: Deps) {
 export function adminSettingsRoutes(deps: Deps) {
   const c = createSettingsController(deps);
   const r = Router();
-  r.use(noStore, requirePermission("homepage:manage"));
-  r.get("/homepage", c.getHomepage);
-  r.put("/homepage", c.saveHomepage);
+  r.use(noStore);
+  r.get("/homepage", requirePermission("homepage:manage"), c.getHomepage);
+  r.put("/homepage", requirePermission("homepage:manage"), c.saveHomepage);
+  // Social links live in the footer next to the information pages.
+  r.get("/social", requirePermission("pages:manage", "homepage:manage"), c.getSocial);
+  r.put("/social", requirePermission("pages:manage", "homepage:manage"), c.saveSocial);
   return r;
 }

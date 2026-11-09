@@ -3,7 +3,7 @@ import { parse } from "../../lib/http.js";
 import type { Revalidator } from "../../lib/revalidate.js";
 import { audit } from "../audit/audit.service.js";
 import * as categories from "./category.service.js";
-import { categorySchema, categoryUpdateSchema, idParams, localeQuery, slugParam } from "./category.validation.js";
+import { categorySchema, categoryUpdateSchema, deleteQuery, idParams, localeQuery, slugParam } from "./category.validation.js";
 
 export function createCategoryController(deps: { revalidate: Revalidator }) {
   const refresh = () => deps.revalidate(["taxonomy", "articles"]);
@@ -35,6 +35,15 @@ export function createCategoryController(deps: { revalidate: Revalidator }) {
       await audit(req, { action: "category.update", entityType: "category", entityId: String(id) });
       await refresh();
       res.json({ data: { ...doc.toObject({ versionKey: false }), id: String(doc._id) } });
+    },
+
+    async remove(req: Request, res: Response) {
+      const { id } = parse(idParams, req.params);
+      const { moveTo } = parse(deleteQuery, req.query);
+      const result = await categories.remove(id, moveTo);
+      await audit(req, { action: "category.delete", entityType: "category", entityId: String(id), summary: result.name, metadata: { moved: result.moved, moveTo: moveTo ? String(moveTo) : null } });
+      await deps.revalidate(["taxonomy", "articles", "settings"]);
+      res.json({ data: { deleted: true, moved: result.moved } });
     },
   };
 }

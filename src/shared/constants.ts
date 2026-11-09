@@ -19,10 +19,11 @@ export const AD_PLACEMENT_KEYS = [
   "article_inline",
   "sidebar",
   "footer",
+  "sticky_bottom",
 ] as const;
 export type AdPlacementKey = (typeof AD_PLACEMENT_KEYS)[number];
 
-export const PAGE_KEYS = ["about", "contact", "editorial-policy", "corrections", "privacy", "terms"] as const;
+export const PAGE_KEYS = ["about", "contact", "editorial-policy", "corrections", "privacy", "terms", "advertise"] as const;
 export type PageKey = (typeof PAGE_KEYS)[number];
 
 export interface Localized {

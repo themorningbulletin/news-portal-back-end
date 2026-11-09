@@ -14,10 +14,13 @@ const localizedRequired = (max: number) => z.object({ bn: z.string().trim().min(
 export const localizedOptional = (max: number) =>
   z.object({ bn: z.string().trim().max(max).optional(), en: z.string().trim().max(max).optional() }).strict();
 
+/** An empty web address means "make it from the name". */
+const optionalSlug = z.union([z.literal(""), slugInput]).optional();
+
 export const categorySchema = z
   .object({
     name: localizedRequired(80),
-    slug: z.object({ bn: slugInput, en: slugInput }).strict(),
+    slug: z.object({ bn: optionalSlug, en: optionalSlug }).strict().optional(),
     description: localizedOptional(400).optional(),
     parent: objectId.nullable().optional(),
     order: z.number().int().min(0).max(1000).optional(),
@@ -30,4 +33,5 @@ export type CategoryUpdateInput = z.infer<typeof categoryUpdateSchema>;
 
 export const localeQuery = z.object({ locale: localeSchema });
 export const idParams = z.object({ id: objectId });
+export const deleteQuery = z.object({ moveTo: objectId.optional() });
 export const slugParam = z.string().trim().min(1).max(160).transform((s) => s.normalize("NFC"));

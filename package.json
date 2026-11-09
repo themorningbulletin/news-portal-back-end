@@ -18,7 +18,8 @@
     "seed": "tsx --env-file-if-exists=.env src/scripts/seed.ts",
     "bootstrap-admin": "tsx --env-file-if-exists=.env src/scripts/bootstrap-admin.ts",
     "sync-indexes": "tsx --env-file-if-exists=.env src/scripts/sync-indexes.ts",
-    "check-firebase": "tsx --env-file-if-exists=.env src/scripts/check-firebase.ts"
+    "check-firebase": "tsx --env-file-if-exists=.env src/scripts/check-firebase.ts",
+    "setup-site": "tsx --env-file-if-exists=.env src/scripts/setup-site.ts"
   },
   "dependencies": {
     "compression": "^1.8.2",

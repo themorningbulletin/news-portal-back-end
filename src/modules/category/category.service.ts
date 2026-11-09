@@ -1,6 +1,9 @@
 import type { Types } from "mongoose";
 import { AppError, notFound } from "../../lib/errors.js";
 import { sanitizePlain } from "../../lib/sanitize.js";
+import { slugify } from "../../lib/text.js";
+import { SiteSettings } from "../settings/settings.model.js";
+import { UserProfile } from "../user/user.model.js";
 import type { Locale } from "../../shared/constants.js";
 import { Article } from "../article/article.model.js";
 import { Category } from "./category.model.js";
@@ -54,9 +57,47 @@ async function assertTopLevelParent(parent: Types.ObjectId | null | undefined) {
   }
 }
 
+/** A web address made from the name (or the one given), with -2, -3… added if another section already uses it. */
+async function uniqueSlug(locale: Locale, wanted: string, excludeId?: Types.ObjectId) {
+  const base = slugify(wanted) || "section";
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? base : `${base.slice(0, 115)}-${n}`;
+    const taken = await Category.exists({ [`slug.${locale}`]: candidate, ...(excludeId ? { _id: { $ne: excludeId } } : {}) });
+    if (!taken) return candidate;
+  }
+}
+
 export async function create(input: CategoryInput) {
   await assertTopLevelParent(input.parent);
-  return Category.create({ ...input, name: clean(input.name), description: clean(input.description) });
+  const name = clean(input.name) as { bn: string; en: string };
+  const slug = {
+    bn: await uniqueSlug("bn", input.slug?.bn || name.bn),
+    en: await uniqueSlug("en", input.slug?.en || name.en),
+  };
+  return Category.create({ ...input, name, slug, description: clean(input.description) });
+}
+
+/**
+ * Deletes a section. Subsections must be moved or deleted first. Its stories are moved
+ * to `moveTo` (required when it has any), and it leaves the homepage layout and
+ * readers' followed sections.
+ */
+export async function remove(id: Types.ObjectId, moveTo?: Types.ObjectId) {
+  const doc = await Category.findById(id);
+  if (!doc) throw notFound("Category");
+  if (await Category.exists({ parent: id })) {
+    throw new AppError("validation_failed", "This section has subsections. Delete them or move them to another section first.");
+  }
+  const stories = await Article.countDocuments({ category: id });
+  if (stories > 0) {
+    if (!moveTo) throw new AppError("validation_failed", "Choose a section to move this section's stories to.", { stories });
+    if (String(moveTo) === String(id) || !(await Category.exists({ _id: moveTo }))) throw new AppError("validation_failed", "Choose another existing section");
+    await Article.updateMany({ category: id }, { $set: { category: moveTo } });
+  }
+  await SiteSettings.updateOne({ key: "site" }, { $pull: { homepageSections: { category: id } } });
+  await UserProfile.updateMany({ followedCategories: id }, { $pull: { followedCategories: id } });
+  await doc.deleteOne();
+  return { moved: stories, name: doc.name.en };
 }
 
 /** Sections nest one level deep: a subsection cannot have children. */
@@ -68,7 +109,12 @@ export async function update(id: Types.ObjectId, input: CategoryUpdateInput) {
   }
   const set: Record<string, unknown> = {};
   if (input.name) for (const [k, v] of Object.entries(clean(input.name))) set[`name.${k}`] = v;
-  if (input.slug) for (const [k, v] of Object.entries(input.slug)) set[`slug.${k}`] = v;
+  if (input.slug) {
+    for (const k of ["bn", "en"] as const) {
+      const wanted = input.slug[k] || input.name?.[k];
+      if (wanted) set[`slug.${k}`] = await uniqueSlug(k, wanted, id);
+    }
+  }
   if (input.description) for (const [k, v] of Object.entries(clean(input.description))) set[`description.${k}`] = v;
   for (const k of ["parent", "order", "isActive"] as const) if (input[k] !== undefined) set[k] = input[k];
   const doc = await Category.findByIdAndUpdate(id, { $set: set }, { returnDocument: "after", runValidators: true });

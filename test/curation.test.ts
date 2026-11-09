@@ -26,7 +26,7 @@ describe("homepage controls page", () => {
     expect(d.pins.map((p: { id: string }) => p.id)).toEqual([String(b!._id), String(a!._id)]);
     expect(d.homepage.lead.id).toBe(String(b!._id));
     expect(d.featured.length).toBeGreaterThan(0);
-    expect(d.homepage.top).toHaveLength(4);
+    expect(d.homepage.top).toHaveLength(3);
 
     // Pinning the older one again brings it back to the front.
     await request(ctx.app).post(`${URL}/${a!._id}`).set(auth).send({ action: "pin", until: soon() }).expect(200);

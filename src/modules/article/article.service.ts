@@ -3,6 +3,7 @@ import { escapeRegex } from "../../lib/text.js";
 import { Article, type ArticleDoc } from "./article.model.js";
 import { Category } from "../category/category.model.js";
 import { SiteSettings } from "../settings/settings.model.js";
+import { DEFAULT_COUNT, type HomepageBlock } from "../settings/settings.service.js";
 import { type ArticleFormat, type Locale } from "../../shared/constants.js";
 import { serializeArticleCard, serializeArticleDetail, type LeanArticle } from "./article.serializer.js";
 import { serializeCategory, type LeanCategory } from "../category/category.serializer.js";
@@ -211,6 +212,9 @@ export async function breakingArticles(locale: Locale) {
   return cards({ ...publishedFilter(locale, now), breakingUntil: { $gt: now } }, 5);
 }
 
+/** Stories under the lead in the homepage's first block. */
+const TOP_COUNT = 3;
+
 export async function homepage(locale: Locale) {
   const now = new Date();
   const pub = publishedFilter(locale, now);
@@ -231,10 +235,20 @@ export async function homepage(locale: Locale) {
   const pinned = await take({ pinnedUntil: { $gt: now } }, 1, "pinnedAt");
   const lead = pinned[0] ?? (await take({ isFeatured: true }, 1, "featuredAt"))[0] ?? (await take({}, 1))[0] ?? null;
   if (lead) markProminent([lead]);
-  const topFeatured = await take({ isFeatured: true }, 4, "featuredAt");
+  const topFeatured = await take({ isFeatured: true }, TOP_COUNT, "featuredAt");
   markProminent(topFeatured);
-  const top = topFeatured.length < 4 ? [...topFeatured, ...(await take({}, 4 - topFeatured.length))] : topFeatured;
-  markProminent(top.slice(topFeatured.length));
+  // Under the lead: featured stories, then editors' picks, then the newest.
+  const top = [...topFeatured];
+  if (top.length < TOP_COUNT) {
+    const picks = await take({ isEditorsPick: true }, TOP_COUNT - top.length, "editorsPickAt");
+    markProminent(picks);
+    top.push(...picks);
+  }
+  if (top.length < TOP_COUNT) {
+    const newest = await take({}, TOP_COUNT - top.length);
+    markProminent(newest);
+    top.push(...newest);
+  }
   const latest = await take({}, 8);
   const editorsPicks = await take({ isEditorsPick: true }, 4, "editorsPickAt");
   const explainers = await take({ format: "explainer" }, 4);
@@ -242,17 +256,27 @@ export async function homepage(locale: Locale) {
   const opinion = await take({ format: "opinion" }, 4);
 
   const settings = await SiteSettings.findOne({ key: "site" })
-    .populate<{ homepageSections: { category: LeanCategory | null; variant: string }[] }>("homepageSections.category", CATEGORY_FIELDS)
+    .populate<{ homepageSections: (Omit<HomepageBlock, "category"> & { category: LeanCategory | null })[] }>("homepageSections.category", CATEGORY_FIELDS)
     .lean();
-  const sections = [];
+  // Blocks in the editors' order. A section with no stories in this language yet is left out
+  // (the homepage settings page shows editors which ones); ad blocks always stay.
+  const sections: (
+    | { kind: "section"; category: ReturnType<typeof serializeCategory>; variant: HomepageBlock["variant"]; width: number; items: ReturnType<typeof serializeArticleCard>[] }
+    | { kind: "ad"; width: number }
+  )[] = [];
   for (const s of settings?.homepageSections ?? []) {
+    const width = s.width ?? 12;
+    if (s.kind === "ad") {
+      sections.push({ kind: "ad", width });
+      continue;
+    }
     if (!s.category) continue;
     const children = await Category.find({ parent: s.category._id, isActive: true })
       .select("_id")
       .lean<{ _id: Types.ObjectId }[]>();
-    const items = await take({ category: { $in: [s.category._id, ...children.map((c) => c._id)] } }, s.variant === "list" ? 6 : 5);
+    const items = await take({ category: { $in: [s.category._id, ...children.map((c) => c._id)] } }, s.count ?? DEFAULT_COUNT[s.variant]);
     if (items.length === 0) continue;
-    sections.push({ category: serializeCategory(s.category, locale), variant: s.variant, items });
+    sections.push({ kind: "section", category: serializeCategory(s.category, locale), variant: s.variant, width, items });
   }
 
   return {

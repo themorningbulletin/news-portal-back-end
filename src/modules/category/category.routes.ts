@@ -21,5 +21,6 @@ export function adminCategoryRoutes(deps: { revalidate: Revalidator }) {
   r.get("/", requirePermission("article:create"), c.adminList);
   r.post("/", requirePermission("taxonomy:manage"), c.create);
   r.patch("/:id", requirePermission("taxonomy:manage"), c.update);
+  r.delete("/:id", requirePermission("taxonomy:manage"), c.remove);
   return r;
 }

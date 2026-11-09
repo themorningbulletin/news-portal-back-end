@@ -14,7 +14,10 @@ export function sanitizeArticleHtml(dirty: string, allowedImageHosts: string[] =
     allowedAttributes: {
       a: ["href", "rel", "target"],
       img: ["src", "alt", "width", "height"],
+      // Paragraph alignment from the editor; only the text-align property survives (allowedStyles).
+      p: ["style"], h2: ["style"], h3: ["style"], h4: ["style"], blockquote: ["style"],
     },
+    allowedStyles: { "*": { "text-align": [/^(left|right|center|justify)$/] } },
     allowedSchemes: ["http", "https", "mailto"],
     allowedSchemesByTag: { img: ["https"] },
     allowProtocolRelative: false,
