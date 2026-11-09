@@ -45,6 +45,7 @@ try {
     await syncAllIndexes();
     const sections = await applySections({ deactivateOthers: values["deactivate-others"] });
     console.log(`Sections: ${sections.report.created.length} added, ${sections.report.updated.length} updated.`);
+    if (sections.report.merged.length) console.log(`  Duplicates merged (stories moved, old section hidden): ${sections.report.merged.join(", ")}`);
     if (sections.report.deactivated.length) console.log(`  Hidden: ${sections.report.deactivated.join(", ")}`);
     else if (sections.others.length) console.log(`  Not in the list (left as they are): ${sections.others.join(", ")}. Use --deactivate-others to hide them.`);
 

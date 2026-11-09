@@ -35,6 +35,24 @@ describe("site setup", () => {
     expect(cricket.parentId).toBe(sports.id);
   });
 
+  it("merges a duplicate section that already holds one of the web addresses (World + Worlds)", async () => {
+    // As in a real database: "Worlds" was added by hand with the Bangla address বিশ্ব.
+    const worlds = await Category.create({ name: { bn: "বিশ্ব", en: "Worlds" }, slug: { bn: "বিশ্ব", en: "worlds" }, order: 20 });
+    const world = await Category.findOne({ "slug.en": "world" }).lean();
+    const story = await Article.findOne({ locale: "en", status: "published" });
+    await Article.updateOne({ _id: story!._id }, { $set: { category: worlds._id } });
+
+    const { ids, report } = await applySections({ deactivateOthers: true });
+    expect(report.merged).toEqual(["Worlds"]);
+    expect(String(ids.get("world"))).toBe(String(world!._id));
+    expect((await Category.findById(world!._id).lean())!.slug).toEqual({ bn: "বিশ্ব", en: "world" });
+    const old = (await Category.findById(worlds._id).lean())!;
+    expect(old).toMatchObject({ isActive: false, slug: { en: "worlds-old" } });
+    expect(String((await Article.findById(story!._id).lean())!.category)).toBe(String(world!._id));
+    // Running it again changes nothing more.
+    expect((await applySections()).report.merged).toEqual([]);
+  });
+
   it("applies the homepage layout with ad blocks, and shows blocks that have stories", async () => {
     const { ids } = await applySections();
     // The demo content already has a layout: it is only replaced on request.

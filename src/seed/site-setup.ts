@@ -5,7 +5,9 @@
  */
 import { Types } from "mongoose";
 import { slugify } from "../lib/text.js";
+import { Article } from "../modules/article/article.model.js";
 import { Category } from "../modules/category/category.model.js";
+import { UserProfile } from "../modules/user/user.model.js";
 import { Page } from "../modules/page/page.model.js";
 import { SiteSettings, type HomepageBlockDoc } from "../modules/settings/settings.model.js";
 import type { PageKey } from "../shared/constants.js";
@@ -119,7 +121,29 @@ const slugOf = (name: string) => slugify(name.replace(/&/g, " "));
 /** Upserts every section by its English web address (or one it replaces); returns ids by English slug. */
 export async function applySections(opts: { deactivateOthers?: boolean } = {}) {
   const ids = new Map<string, Types.ObjectId>();
-  const report = { created: [] as string[], updated: [] as string[], deactivated: [] as string[] };
+  const report = { created: [] as string[], updated: [] as string[], deactivated: [] as string[], merged: [] as string[] };
+
+  /**
+   * Another section already holding one of these web addresses (for example "Worlds" with
+   * the Bangla address বিশ্ব next to "World") is a duplicate: its stories and subsections
+   * move to the kept section, and it is hidden under a spare address. Nothing is deleted.
+   */
+  const absorbDuplicates = async (keep: Types.ObjectId, slug: { bn: string; en: string }, keepIsSub: boolean) => {
+    const clashes = await Category.find({ _id: { $ne: keep }, $or: [{ "slug.en": slug.en }, { "slug.bn": slug.bn }] });
+    for (const dup of clashes) {
+      await Article.updateMany({ category: dup._id }, { $set: { category: keep } });
+      await Category.updateMany({ parent: dup._id }, { $set: { parent: keepIsSub ? null : keep } });
+      await SiteSettings.updateOne({ key: "site" }, { $pull: { homepageSections: { category: dup._id } } });
+      await UserProfile.updateMany({ followedCategories: dup._id }, { $pull: { followedCategories: dup._id } });
+      for (let n = 1; ; n++) {
+        const spare = { en: `${dup.slug.en}-old${n > 1 ? `-${n}` : ""}`, bn: `${dup.slug.bn}-old${n > 1 ? `-${n}` : ""}` };
+        if (await Category.exists({ $or: [{ "slug.en": spare.en }, { "slug.bn": spare.bn }] })) continue;
+        await Category.updateOne({ _id: dup._id }, { $set: { slug: spare, isActive: false, parent: null } });
+        break;
+      }
+      report.merged.push(dup.name.en);
+    }
+  };
 
   const upsert = async (spec: SectionSpec, order: number, parent: Types.ObjectId | null) => {
     const slug = { bn: slugOf(spec.bn), en: slugOf(spec.en) };
@@ -128,6 +152,7 @@ export async function applySections(opts: { deactivateOthers?: boolean } = {}) {
       (spec.was?.length ? await Category.findOne({ "slug.en": { $in: spec.was } }) : null) ??
       (await Category.findOne({ "slug.bn": slug.bn }));
     const fields = { name: { bn: spec.bn, en: spec.en }, slug, parent, order, isActive: true };
+    if (existing) await absorbDuplicates(existing._id, slug, Boolean(parent));
     if (existing) {
       // A section that is becoming a subsection must hand its own subsections back first.
       if (parent) await Category.updateMany({ parent: existing._id }, { $set: { parent: null } });
